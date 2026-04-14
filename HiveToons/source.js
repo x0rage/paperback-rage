@@ -24,7 +24,7 @@ var _Sources = (() => {
     }
   ];
   var HiveToonsInfo = {
-    version: "1.0.0",
+    version: "1.0.1",
     name: "HiveToons",
     icon: "icon.webp",
     author: "Codex",
@@ -50,11 +50,33 @@ var _Sources = (() => {
       cleaned = "https:" + cleaned;
     }
 
-    try {
-      return new URL(cleaned, HIVE_BASE).toString();
-    } catch (error) {
+    if (/^https?:\/\//i.test(cleaned)) {
       return cleaned;
     }
+
+    if (cleaned.charAt(0) !== "/") {
+      cleaned = "/" + cleaned;
+    }
+
+    return HIVE_BASE + cleaned;
+  }
+
+  function buildQueryString(params) {
+    var pairs = [];
+    for (var key in params) {
+      if (!Object.prototype.hasOwnProperty.call(params, key)) {
+        continue;
+      }
+
+      var value = params[key];
+      if (value === undefined || value === null || value === "") {
+        continue;
+      }
+
+      pairs.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(value)));
+    }
+
+    return pairs.join("&");
   }
 
   function humanize(value) {
@@ -481,18 +503,18 @@ var _Sources = (() => {
     }
 
     async fetchQueryPosts(options) {
-      var params = new URLSearchParams();
-      params.set("page", String(options.page || 1));
-      params.set("perPage", String(options.perPage || 35));
-      params.set("view", "archive");
-      params.set("orderBy", options.orderBy || "lastChapterAddedAt");
-      params.set("orderDirection", options.orderDirection || "desc");
+      var query = buildQueryString({
+        page: options.page || 1,
+        perPage: options.perPage || 35,
+        view: "archive",
+        orderBy: options.orderBy || "lastChapterAddedAt",
+        orderDirection: options.orderDirection || "desc",
+        searchTerm: options.searchTerm && String(options.searchTerm).trim()
+          ? String(options.searchTerm).trim()
+          : undefined
+      });
 
-      if (options.searchTerm && String(options.searchTerm).trim()) {
-        params.set("searchTerm", String(options.searchTerm).trim());
-      }
-
-      var response = await this.scheduleRequest(HIVE_API + "/api/query?" + params.toString());
+      var response = await this.scheduleRequest(HIVE_API + "/api/query?" + query);
       var payload = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
 
       var posts = Array.isArray(payload.posts)
