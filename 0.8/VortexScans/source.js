@@ -27,7 +27,7 @@ var _Sources = (() => {
     version: "1.0.0",
     name: "Vortex Scans",
     icon: "icon.webp",
-    author: "Codex",
+    author: "0xRage",
     authorWebsite: "https://github.com/openai",
     description: "Extension that pulls manga from vortexscans.org",
     contentRating: "MATURE",
