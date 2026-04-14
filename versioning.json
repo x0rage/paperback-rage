@@ -1,0 +1,27 @@
+{
+  "buildTime": "2026-04-13T00:00:00.000Z",
+  "sources": [
+    {
+      "id": "HiveToons",
+      "name": "HiveToons",
+      "author": "Codex",
+      "desc": "Extension that pulls manga from hivetoons.org",
+      "website": "https://github.com/openai",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.webp",
+      "tags": [
+        {
+          "text": "English",
+          "type": "info"
+        }
+      ],
+      "websiteBaseURL": "https://hivetoons.org",
+      "intents": 5
+    }
+  ],
+  "builtWith": {
+    "toolchain": "0.8.7",
+    "types": "0.8.7"
+  }
+}
