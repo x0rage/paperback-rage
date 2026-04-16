@@ -16,7 +16,7 @@ var _Sources = (() => {
     }
   ];
   var GenzUpdatesInfo = {
-    version: "1.0.0",
+    version: "1.0.1",
     name: "Genz Updates",
     icon: "icon.webp",
     author: "0xRage",
@@ -25,7 +25,7 @@ var _Sources = (() => {
     contentRating: "MATURE",
     websiteBaseURL: GENZ_BASE,
     sourceTags: [],
-    intents: 5
+    intents: 53
   };
 
   function normalizeUrl(url) {
@@ -618,7 +618,7 @@ var _Sources = (() => {
     }
 
     if (response.status === 403 || response.status === 503) {
-      throw new Error("Genz Updates blocked the request. Try again later.");
+      throw new Error("Cloudflare Bypass Required");
     }
 
     throw new Error("Genz Updates returned " + response.status + " for " + requestUrl);
@@ -669,6 +669,18 @@ var _Sources = (() => {
 
     getMangaShareUrl(mangaId) {
       return GENZ_BASE + "/series/" + mangaId + "/";
+    }
+
+    getCloudflareBypassRequest() {
+      return App.createRequest({
+        url: GENZ_BASE + "/",
+        method: "GET",
+        headers: {
+          referer: GENZ_BASE + "/",
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        }
+      });
     }
 
     async getMangaDetails(mangaId) {
