@@ -24,7 +24,7 @@ var _Sources = (() => {
     }
   ];
   var VortexScansInfo = {
-    version: "1.0.2",
+    version: "1.0.3",
     name: "Vortex Scans",
     icon: "icon.webp",
     author: "0xRage",
@@ -310,13 +310,18 @@ var _Sources = (() => {
     }
 
     var requestUrl = (response.request && response.request.url) || response.url || "request";
+    var responseBody = String(response.data || "");
 
     if (response.status === 404) {
       throw new Error("Vortex Scans returned 404 for " + requestUrl);
     }
 
     if (response.status === 403 || response.status === 503) {
-      throw new Error("Cloudflare Bypass Required");
+      if (/cloudflare|just a moment|cf-mitigated/i.test(responseBody)) {
+        throw new Error("Cloudflare Bypass Required");
+      }
+
+      throw new Error("Vortex Scans returned " + response.status + " for " + requestUrl);
     }
 
     throw new Error("Vortex Scans returned " + response.status + " for " + requestUrl);
@@ -343,6 +348,135 @@ var _Sources = (() => {
     return output;
   }
 
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function extractMetaContent(html, attribute, value) {
+    var pattern = new RegExp(
+      "<meta[^>]+"
+        + attribute
+        + "=\""
+        + escapeRegExp(value)
+        + "\"[^>]+content=\"([^\"]*)\"",
+      "i"
+    );
+    var match = pattern.exec(html);
+    return match ? decodeHtmlEntities(match[1]) : "";
+  }
+
+  function extractPostFragment(html) {
+    var startToken = "&quot;post&quot;:[0,{";
+    var endToken = ",&quot;publishingTeam&quot;:";
+    var startIndex = html.indexOf(startToken);
+    if (startIndex === -1) {
+      return "";
+    }
+
+    startIndex += startToken.length;
+    var endIndex = html.indexOf(endToken, startIndex);
+    if (endIndex === -1) {
+      return "";
+    }
+
+    return html.substring(startIndex, endIndex);
+  }
+
+  function extractEncodedStringValue(encodedHtml, key) {
+    if (!encodedHtml) {
+      return "";
+    }
+
+    var token = "&quot;" + key + "&quot;:[0,&quot;";
+    var startIndex = encodedHtml.indexOf(token);
+    if (startIndex === -1) {
+      return "";
+    }
+
+    startIndex += token.length;
+    var endIndex = encodedHtml.indexOf("&quot;]", startIndex);
+    if (endIndex === -1) {
+      return "";
+    }
+
+    return decodeHtmlEntities(encodedHtml.substring(startIndex, endIndex));
+  }
+
+  function extractEncodedNumberValue(encodedHtml, key) {
+    if (!encodedHtml) {
+      return 0;
+    }
+
+    var token = "&quot;" + key + "&quot;:[0,";
+    var startIndex = encodedHtml.indexOf(token);
+    if (startIndex === -1) {
+      return 0;
+    }
+
+    startIndex += token.length;
+    var endIndex = encodedHtml.indexOf("]", startIndex);
+    if (endIndex === -1) {
+      return 0;
+    }
+
+    return toNumber(encodedHtml.substring(startIndex, endIndex));
+  }
+
+  function extractSeriesChapters(html) {
+    var chapters = [];
+    var seen = {};
+    var pattern = /&quot;id&quot;:\[0,(-?\d+)\],&quot;number&quot;:\[0,(-?\d+(?:\.\d+)?)\],&quot;slug&quot;:\[0,&quot;([^"]+?)&quot;\],&quot;title&quot;:\[0,&quot;([\s\S]*?)&quot;\],&quot;createdAt&quot;:\[0,&quot;([^"]+?)&quot;\][\s\S]{0,1500}?&quot;isAccessible&quot;:\[0,(true|false)\]/g;
+    var match;
+
+    while ((match = pattern.exec(html)) !== null) {
+      var slug = decodeHtmlEntities(match[3]);
+      if (!slug || seen[slug]) {
+        continue;
+      }
+
+      seen[slug] = true;
+      chapters.push({
+        id: toNumber(match[1]),
+        number: toNumber(match[2]),
+        slug: slug,
+        title: cleanDescription(match[4]),
+        createdAt: match[5],
+        isAccessible: match[6] === "true"
+      });
+    }
+
+    return chapters;
+  }
+
+  function extractSeriesPageData(html, mangaId) {
+    var postFragment = extractPostFragment(html);
+    var chapters = extractSeriesChapters(html);
+    var postTitle = extractEncodedStringValue(postFragment, "postTitle") || extractMetaContent(html, "property", "og:title") || humanize(mangaId);
+    var featuredImage = extractEncodedStringValue(postFragment, "featuredImage") || extractMetaContent(html, "property", "og:image");
+    var postContent = extractEncodedStringValue(postFragment, "postContent");
+
+    var post = {
+      id: extractEncodedNumberValue(postFragment, "id"),
+      slug: mangaId,
+      postTitle: postTitle,
+      postContent: postContent,
+      featuredImage: featuredImage,
+      averageRating: extractEncodedNumberValue(html, "averageRating"),
+      author: "",
+      artist: "",
+      seriesType: extractEncodedStringValue(postFragment, "seriesType"),
+      seriesStatus: extractEncodedStringValue(postFragment, "seriesStatus"),
+      genres: [],
+      chapters: chapters
+    };
+
+    return {
+      post: post,
+      chapters: chapters,
+      totalChapterCount: chapters.length
+    };
+  }
+
   function extractChapterPages(html) {
     var pattern = /https:\/\/storage\.(?:vortexscans|vortexcomics)\.org\/[^"'\s<>]*upload\/series\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp|gif|avif)/ig;
     var matches = [];
@@ -367,8 +501,7 @@ var _Sources = (() => {
 
   var VortexScans = class {
     constructor() {
-      this.postCache = {};
-      this.chapterCache = {};
+      this.seriesCache = {};
       this.requestManager = App.createRequestManager({
         requestsPerSecond: 4,
         requestTimeout: 20000,
@@ -406,7 +539,7 @@ var _Sources = (() => {
     }
 
     async getMangaDetails(mangaId) {
-      var payload = await this.fetchPost(mangaId);
+      var payload = await this.fetchSeriesPageData(mangaId);
       var post = payload.post;
 
       return App.createSourceManga({
@@ -425,9 +558,8 @@ var _Sources = (() => {
     }
 
     async getChapters(mangaId) {
-      var payload = await this.fetchPost(mangaId);
-      var chaptersPayload = await this.fetchChaptersByPostId(payload.post.id);
-      var chapters = Array.isArray(chaptersPayload.chapters) ? chaptersPayload.chapters.slice() : [];
+      var payload = await this.fetchSeriesPageData(mangaId);
+      var chapters = Array.isArray(payload.chapters) ? payload.chapters.slice() : [];
 
       chapters = chapters
         .filter(function(chapter) {
@@ -552,52 +684,20 @@ var _Sources = (() => {
       };
     }
 
-    async fetchPost(mangaId) {
-      if (this.postCache[mangaId]) {
-        return this.postCache[mangaId];
+    async fetchSeriesPageData(mangaId) {
+      if (this.seriesCache[mangaId]) {
+        return this.seriesCache[mangaId];
       }
 
-      var response = await this.scheduleRequest(
-        VORTEX_API +
-          "/api/post?" +
-          buildQueryString({
-            postSlug: mangaId,
-            includeChapters: 0
-          })
-      );
-      var payload = parseJsonData(response.data);
+      var response = await this.scheduleRequest(VORTEX_BASE + "/series/" + mangaId);
+      var payload = extractSeriesPageData(String(response.data || ""), mangaId);
 
       if (!payload || !payload.post || !payload.post.slug) {
         throw new Error("Unable to load Vortex Scans series: " + mangaId);
       }
 
-      this.postCache[mangaId] = payload;
+      this.seriesCache[mangaId] = payload;
       return payload;
-    }
-
-    async fetchChaptersByPostId(postId) {
-      if (this.chapterCache[postId]) {
-        return this.chapterCache[postId];
-      }
-
-      var response = await this.scheduleRequest(
-        VORTEX_API +
-          "/api/chapters?" +
-          buildQueryString({
-            postId: postId
-          })
-      );
-      var payload = parseJsonData(response.data);
-      var chapters = payload && payload.post && Array.isArray(payload.post.chapters)
-        ? payload.post.chapters
-        : [];
-
-      var result = {
-        chapters: chapters,
-        totalChapterCount: payload && payload.totalChapterCount ? payload.totalChapterCount : chapters.length
-      };
-      this.chapterCache[postId] = result;
-      return result;
     }
 
     async scheduleRequest(url) {
